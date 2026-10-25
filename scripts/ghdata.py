@@ -153,15 +153,23 @@ def summarize(data: dict) -> dict:
     counts = [days.get(d, 0) for d in year]
 
     longest = run = 0
+    longest_span = cur_start = None
     for d in sorted(days):
-        run = run + 1 if days[d] > 0 else 0
-        longest = max(longest, run)
+        if days[d] > 0:
+            cur_start = d if run == 0 else cur_start
+            run += 1
+            if run > longest:
+                longest, longest_span = run, (cur_start, d)
+        else:
+            run = 0
     current, cur = 0, end
     if days.get(cur, 0) == 0:  # today still open: a streak is alive if yesterday counted
         cur -= dt.timedelta(days=1)
+    current_end = cur
     while days.get(cur, 0) > 0:
         current += 1
         cur -= dt.timedelta(days=1)
+    current_span = (cur + dt.timedelta(days=1), current_end) if current else None
 
     # 53 Sunday-first columns ending at the week that contains `end`, like github.com
     start = end - dt.timedelta(days=(end.weekday() + 1) % 7) - dt.timedelta(weeks=52)
@@ -194,6 +202,9 @@ def summarize(data: dict) -> dict:
         "longest_streak": longest,
         "first_active": active[0].isoformat() if active else None,
         "weekly": weekly,
+        "best_week": max(weekly) if weekly else 0,
+        "current_span": [d.isoformat() for d in current_span] if current_span else None,
+        "longest_span": [d.isoformat() for d in longest_span] if longest_span else None,
         "grid": grid,
         "lang_bytes": lang_bytes.most_common(),
         "lang_repos": lang_repos.most_common(),

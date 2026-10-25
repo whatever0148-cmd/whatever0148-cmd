@@ -8,7 +8,9 @@ days, weekly sparkline) and a link bar sit beside and under the portrait.
 """
 from __future__ import annotations
 
+import re
 import sys
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -22,7 +24,8 @@ ROWS = 85
 CROP = (200, 22, 844, 868)          # x0, y0, x1, y1 in the 1024px source: head and collar
 FS = 7.0                            # font size == row pitch
 CW = FS * 0.6                       # JetBrains Mono advance: exactly 0.6em
-RAMP = " .`:-=+*cxoaO#%@"           # sparse -> dense
+RAMP = " .`:-=+*cxoaO#%@"           # sparse -> dense (glyph mode)
+CODE_MODE = True                    # draw the face with this script's own source code
 LEVELS = 8                          # tonal classes (fill-opacity steps)
 REVEAL = 2.4                        # seconds for the top-to-bottom draw
 
@@ -76,6 +79,12 @@ def subject_mask(rgb: Image.Image) -> np.ndarray:
     return np.asarray(alpha).astype(float) / 255
 
 
+def code_stream() -> str:
+    """This file's own source as one continuous run of glyphs: the portrait is drawn from its generator."""
+    src = Path(__file__).read_text()
+    return re.sub(r"\s+", " ", src)
+
+
 def portrait_grid() -> tuple[list[str], list[list[int]], int]:
     src = Image.open(PHOTO).convert("RGB").crop(CROP)
     alpha = subject_mask(src)
@@ -86,6 +95,10 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
         ImageFilter.UnsharpMask(radius=4, percent=140, threshold=2))
     eq = np.asarray(detail).astype(float) / 255
     eq = eq ** 0.85                                  # gamma: lift midtones for a dark canvas
+    if CODE_MODE:
+        # keep the planes of the face (brow, cheekbones, nose, jaw), drop skin and hair detail
+        eq = np.asarray(Image.fromarray((eq * 255).astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(5))).astype(float) / 255
 
     w, h = src.size
     cols = round(ROWS * (w / h) / 0.6)
@@ -97,7 +110,9 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
     d = np.hypot((xx / cols - 0.5) / 0.5, (yy / ROWS - 0.40) / 0.55)
     small = small * (1 - 0.55 * np.clip(d - 0.3, 0, 1))
     lo, hi = np.percentile(small[a_small > 0.5], [3, 99.3])
-    v = 0.16 + 0.84 * np.clip((small - lo) / (hi - lo), 0, 1) ** 1.25  # floor keeps hair texture visible
+    norm = np.clip((small - lo) / (hi - lo), 0, 1)
+    # glyph mode keeps a floor for hair texture; code mode wants deep shadows so light sculpts the face
+    v = norm ** 1.35 if CODE_MODE else 0.16 + 0.84 * norm ** 1.25
 
     # the figure dissolves into the dark instead of ending on a hard cut-out:
     # a soft edge from the mask, a fade below the collar, and seeded noise
@@ -105,6 +120,8 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
     fade = 1 - np.clip((yy / ROWS - 0.64) / 0.26, 0, 1) ** 1.2
     weight = np.clip((a_small - 0.15) / 0.6, 0, 1) * fade
     thresh = np.random.default_rng(7).uniform(0.05, 0.95, (ROWS, cols))  # fixed seed: stable commits
+    stream = code_stream() if CODE_MODE else None
+    pos = 0
     chars, levels = [], []
     for r in range(ROWS):
         row_c, row_l = [], []
@@ -115,7 +132,13 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
                 row_l.append(0)
                 continue
             x = v[r, c] * (0.45 + 0.55 * wgt)
-            row_c.append(RAMP[1 + min(int(x * (len(RAMP) - 1)), len(RAMP) - 2)])
+            if CODE_MODE:
+                x = max(x, 0.02)              # shadowed code stays faintly present: the silhouette holds
+            if CODE_MODE:
+                # code keeps flowing left to right; brightness only sets its opacity class
+                row_c.append(stream[(r * cols + c) % len(stream)])
+            else:
+                row_c.append(RAMP[1 + min(int(x * (len(RAMP) - 1)), len(RAMP) - 2)])
             row_l.append(1 + min(int(x * LEVELS), LEVELS - 1))
         chars.append("".join(row_c))
         levels.append(row_l)
@@ -209,11 +232,14 @@ def build() -> str:
     rx = PX + pw + 34                      # right column
     rw = W - rx - 26
 
-    opac = [0, 0.3, 0.42, 0.55, 0.67, 0.78, 0.88, 0.96, 1.0]
+    # code mode spreads the steps wider: dim code recedes, lit code carries the structure
+    opac = ([0, 0.14, 0.22, 0.33, 0.46, 0.6, 0.76, 0.9, 1.0] if CODE_MODE
+            else [0, 0.3, 0.42, 0.55, 0.67, 0.78, 0.88, 0.96, 1.0])
     level_css = "".join(
         f".l{i}{{fill:url(#{'hi' if i >= LEVELS - 1 else 'tone'});fill-opacity:{opac[i]}}}" for i in range(1, LEVELS + 1))
     css = (
         level_css
+        + (".l7,.l8{font-weight:700}" if CODE_MODE else "")
         + f".p text{{font-size:{FS}px;}}"
         f".k{{font-size:10.5px;fill:{MUTED};letter-spacing:.08em}}"
         f".big{{font-size:22px;font-weight:700;fill:{TEXT}}}"
@@ -283,7 +309,9 @@ def build() -> str:
     brackets = "".join(
         f'<path d="M{x0},{y0 + dy * L}V{y0}H{x0 + dx * L}" fill="none" stroke="{EMERALD}" stroke-width="1.6"/>'
         for x0, y0, dx, dy in ((bx0, by0, 1, 1), (bx1, by0, -1, 1), (bx0, by1, 1, -1), (bx1, by1, -1, -1)))
-    hud_label = (f'<text x="{bx0 + 4}" y="{by1 + 18}" class="k">SUBJECT 01 · {ROWS} ROWS × {cols} COLS · CLAHE γ0.85</text>')
+    caption = (f"SUBJECT 01 · DRAWN WITH ITS OWN SOURCE · {ROWS} × {cols}" if CODE_MODE
+               else f"SUBJECT 01 · {ROWS} ROWS × {cols} COLS · CLAHE γ0.85")
+    hud_label = f'<text x="{bx0 + 4}" y="{by1 + 18}" class="k">{caption}</text>'
 
     # right column: identity + readout, typed in after the portrait lands
     t = REVEAL + 0.1

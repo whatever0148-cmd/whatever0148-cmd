@@ -1,11 +1,11 @@
-"""Build assets/hero_portrait_hud.svg: a character-ramp portrait over live telemetry.
+"""Build assets/hero_portrait_hud.svg: a character-grid portrait with a CRT HUD.
 
 The photo is cut out from its white backdrop, contrast-equalised (CLAHE +
-gamma) and pushed through a 70-step character ramp on an 85-row monospace
-grid, one <text> per row. Each row lands as a squashed horizontal streak that
-stretches open into glyphs, top to bottom. Under the head: contributions in
-the last year, active days, best week and a weekly sparkline, all from the
-GitHub GraphQL API. Ink follows the viewer's light/dark preference.
+gamma), pushed through a 70-step character ramp on an 85-row monospace grid
+and written as one <text> per row. Each row lands as a squashed streak and
+stretches open into glyphs, top to bottom, then an emerald/cyan radar sweep
+idles over the frame. A telemetry strip (contributions, active
+days, weekly sparkline) and a link bar sit beside and under the portrait.
 """
 from __future__ import annotations
 
@@ -15,22 +15,23 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 import ghdata
-from svgkit import ROOT, document, esc, owner, smooth_path, write
+from svgkit import (CYAN, EDGE, EMERALD, MUTED, PANEL, ROOT, TEXT, document, esc, frame, owner,
+                    smooth_path, write)
 
 PHOTO = ROOT / "source" / "headshot.jpg"
 ROWS = 85
-CROP = (250, 28, 800, 720)          # x0, y0, x1, y1 in the 1024px source: head to chin
-FS = 5.6                            # font size == row pitch
+CROP = (251, 28, 790, 735)          # x0, y0, x1, y1 in the 1024px source: head to chin
+FS = 7.0                            # font size == row pitch
 CW = FS * 0.6                       # JetBrains Mono advance: exactly 0.6em
-RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"  # 70 steps, sparse -> dense
 LEVELS = 8                          # tonal classes (fill-opacity steps)
-OPACITY = [0, 0.18, 0.28, 0.4, 0.52, 0.65, 0.78, 0.9, 1.0]
-REVEAL = 2.8                        # seconds for the top-to-bottom draw
+REVEAL = 2.4                        # seconds for the top-to-bottom draw
 
-W = 860
+W, H = 960, 750
+PX, PY = 26, 54                     # portrait origin
 
 
-def clahe(img: np.ndarray, tiles: int = 8, clip: float = 2.8, bins: int = 256) -> np.ndarray:
+def clahe(img: np.ndarray, tiles: int = 8, clip: float = 3.4, bins: int = 256) -> np.ndarray:
     """Contrast-limited adaptive histogram equalisation on a [0,1] image."""
     h, w = img.shape
     th, tw = h // tiles, w // tiles
@@ -94,13 +95,12 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
     # gamma for a dark canvas; the floor keeps dark hair readable as texture
     v = 0.14 + 0.86 * np.clip((small - lo) / (hi - lo), 0, 1) ** 1.1
 
-    # below the chin the figure frays out instead of ending on a straight cut
+    # below the chin the head frays out into scattered glyphs instead of a straight cut
     yy = np.mgrid[0:ROWS, 0:cols][0]
     fade = 1 - np.clip((yy / ROWS - 0.82) / 0.18, 0, 1)
     weight = np.clip((a_small - 0.2) / 0.5, 0, 1) * fade
     noise = np.random.default_rng(7).uniform(0.05, 0.9, (ROWS, cols))  # fixed seed: stable commits
     keep = weight > np.where(yy / ROWS > 0.8, noise, 0.05)
-
     chars, levels = [], []
     for r in range(ROWS):
         row_c, row_l = [], []
@@ -117,7 +117,7 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
     return chars, levels, cols
 
 
-def portrait_rows(chars: list[str], levels: list[list[int]], cols: int, px: float, py: float) -> str:
+def portrait_rows(chars: list[str], levels: list[list[int]], cols: int) -> str:
     out = []
     width = cols * CW
     for r, (line, lv) in enumerate(zip(chars, levels)):
@@ -131,11 +131,11 @@ def portrait_rows(chars: list[str], levels: list[list[int]], cols: int, px: floa
             seg = line[i:j]
             spans.append(f'<tspan class="l{lv[i]}">{esc(seg)}</tspan>' if lv[i] else esc(seg))
             i = j
-        begin = 0.2 + r * REVEAL / ROWS
-        y = py + (r + 1) * FS
+        begin = 0.15 + r * REVEAL / ROWS
+        y = PY + (r + 1) * FS
         # the row arrives squashed flat into a bright streak, then stretches open into glyphs
         out.append(
-            f'<g transform="translate({px:.1f},{y:.1f})"><text textLength="{width:.1f}" lengthAdjust="spacing" '
+            f'<g transform="translate({PX},{y:.1f})"><text textLength="{width:.1f}" lengthAdjust="spacing" '
             f'xml:space="preserve" opacity="0">{"".join(spans)}'
             f'<set attributeName="opacity" to="1" begin="{begin:.3f}s" fill="freeze"/>'
             f'<animateTransform attributeName="transform" type="scale" values="1.06 0.08;1.02 0.35;1 1" '
@@ -145,35 +145,43 @@ def portrait_rows(chars: list[str], levels: list[list[int]], cols: int, px: floa
     return "".join(out)
 
 
-def telemetry(s: dict, x0: float, x1: float, y: float) -> str:
-    t0 = REVEAL + 0.4
-    w = x1 - x0
-    out = [
-        f'<g class="in" style="animation-delay:{t0:.1f}s">'
-        f'<text x="{x0}" y="{y + 36}" font-size="40" font-weight="700" class="ink">{s["total_year"]}</text>'
-        f'<text x="{x0 + 2}" y="{y + 56}" font-size="10.5" class="soft">contributions in the last year</text>'
-        f'<text x="{x1}" y="{y + 12}" font-size="16" font-weight="700" class="ink" text-anchor="end">{s["active_days"]}</text>'
-        f'<text x="{x1}" y="{y + 25}" font-size="9.5" class="soft" text-anchor="end">active days</text>'
-        f'<text x="{x1}" y="{y + 45}" font-size="16" font-weight="700" class="ink" text-anchor="end">{s["best_week"]}</text>'
-        f'<text x="{x1}" y="{y + 58}" font-size="9.5" class="soft" text-anchor="end">best week</text>'
-        "</g>"
-    ]
+def telemetry(s: dict, x: float, y: float, w: float) -> str:
+    total, active = s["total_year"], s["active_days"]
     weekly = s["weekly"]
-    sy, sh = y + 72, 52
+    t0 = REVEAL + 0.3
+    out = [f'<text x="{x}" y="{y}" class="k">TELEMETRY · last 365 days · github {s["source"]}</text>']
+    boxes = [("CONTRIBUTIONS", total), ("ACTIVE DAYS", active), ("REPOS", s["repo_count"])]
+    bw = (w - 2 * 12) / 3
+    for i, (label, val) in enumerate(boxes):
+        bx = x + i * (bw + 12)
+        out.append(
+            f'<g opacity="0"><animate attributeName="opacity" from="0" to="1" begin="{t0 + i * 0.15:.2f}s" dur="0.4s" fill="freeze"/>'
+            f'<rect x="{bx}" y="{y + 12}" width="{bw:.1f}" height="58" rx="8" fill="{PANEL}" stroke="{EDGE}"/>'
+            f'<text x="{bx + 14}" y="{y + 32}" class="k">{label}</text>'
+            f'<text x="{bx + 14}" y="{y + 58}" class="big">{val}</text></g>'
+        )
+    # weekly sparkline, Catmull-Rom smoothed into cubic beziers
+    sy, sh = y + 90, 112
     peak = max(max(weekly), 1)
-    pts = [(x0 + i * w / (len(weekly) - 1), sy + sh - 2 - (c / peak) * (sh - 8)) for i, c in enumerate(weekly)]
+    pts = [(x + i * w / (len(weekly) - 1), sy + sh - 6 - (c / peak) * (sh - 14)) for i, c in enumerate(weekly)]
     line = smooth_path(pts)
-    area = line + f"L{x1:.1f},{sy + sh:.1f}L{x0:.1f},{sy + sh:.1f}Z"
+    area = line + f"L{x + w:.1f},{sy + sh:.1f}L{x:.1f},{sy + sh:.1f}Z"
     lx, ly = pts[-1]
     out.append(
-        f'<path d="{area}" class="area" opacity="0">'
-        f'<animate attributeName="opacity" from="0" to="1" begin="{t0 + 0.8:.2f}s" dur="0.8s" fill="freeze"/></path>'
-        f'<path d="{line}" fill="none" class="stroke" stroke-width="1.6" stroke-linecap="round" '
+        f'<rect x="{x}" y="{sy}" width="{w}" height="{sh}" rx="8" fill="{PANEL}" stroke="{EDGE}"/>'
+        f'<g clip-path="url(#sparkclip)">'
+        f'<path d="{area}" fill="url(#sparkfill)" opacity="0">'
+        f'<animate attributeName="opacity" from="0" to="1" begin="{t0 + 0.9:.2f}s" dur="0.8s" fill="freeze"/></path>'
+        f'<path d="{line}" fill="none" stroke="url(#sparkline)" stroke-width="1.8" stroke-linecap="round" '
         f'pathLength="1" stroke-dasharray="1" stroke-dashoffset="1">'
-        f'<animate attributeName="stroke-dashoffset" from="1" to="0" begin="{t0 + 0.2:.2f}s" dur="1.6s" '
-        f'fill="freeze" calcMode="spline" keySplines="0.4 0 0.2 1" keyTimes="0;1"/></path>'
-        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3" class="dot" opacity="0">'
-        f'<animate attributeName="opacity" from="0" to="1" begin="{t0 + 1.8:.2f}s" dur="0.3s" fill="freeze"/></circle>'
+        f'<animate attributeName="stroke-dashoffset" from="1" to="0" begin="{t0 + 0.4:.2f}s" dur="1.6s" '
+        f'fill="freeze" calcMode="spline" keySplines="0.4 0 0.2 1" keyTimes="0;1"/></path></g>'
+        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3" fill="{CYAN}" opacity="0">'
+        f'<animate attributeName="opacity" from="0" to="1" begin="{t0 + 2.0:.2f}s" dur="0.3s" fill="freeze"/></circle>'
+        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3" fill="none" stroke="{CYAN}" opacity="0">'
+        f'<animate attributeName="r" values="3;11" dur="1.8s" begin="{t0 + 2.0:.2f}s" repeatCount="indefinite"/>'
+        f'<animate attributeName="opacity" values="0.8;0" dur="1.8s" begin="{t0 + 2.0:.2f}s" repeatCount="indefinite"/></circle>'
+        f'<text x="{x + 12}" y="{sy + sh + 18}" class="k">52 weeks · peak {max(weekly)}/wk · synced {s["fetched"]}</text>'
     )
     return "".join(out)
 
@@ -183,22 +191,116 @@ def build() -> str:
     stats = ghdata.summarize(ghdata.load(login, refresh="--refresh" in sys.argv))
     chars, levels, cols = portrait_grid()
     pw, ph = cols * CW, ROWS * FS
-    px, py = (W - pw) / 2, 8
-    ty = py + ph + 34
-    h = round(ty + 136)
+    cx, cy = PX + pw / 2, PY + ph / 2
+    rx = PX + pw + 34                      # right column
+    rw = W - rx - 26
 
+    opac = [0, 0.18, 0.28, 0.4, 0.52, 0.65, 0.78, 0.9, 1.0]
+    level_css = "".join(f".l{i}{{fill:{TEXT};fill-opacity:{opac[i]}}}" for i in range(1, LEVELS + 1))
     css = (
-        # ink follows the viewer's theme: light text on dark GitHub, dark text on light
-        "svg{color:#e6edf3}@media (prefers-color-scheme:light){svg{color:#1f2328}}"
-        + "".join(f".l{i}{{fill:currentColor;fill-opacity:{OPACITY[i]}}}" for i in range(1, LEVELS + 1))
-        + f".p text{{font-size:{FS}px}}"
-        ".ink{fill:currentColor}.soft{fill:currentColor;fill-opacity:.6}"
-        ".area{fill:currentColor;fill-opacity:.22}.stroke{stroke:currentColor}.dot{fill:currentColor}"
-        ".in{opacity:0;animation:in .6s ease-out forwards}@keyframes in{to{opacity:1}}"
+        level_css
+        + f".p text{{font-size:{FS}px;}}"
+        f".k{{font-size:10.5px;fill:{MUTED};letter-spacing:.08em}}"
+        f".big{{font-size:22px;font-weight:700;fill:{TEXT}}}"
+        f".v{{font-size:12.5px;fill:{TEXT}}}"
+        f".m{{font-size:12.5px;fill:{MUTED}}}"
+        ".fade{opacity:0;animation:fade .5s ease-out forwards}"
+        "@keyframes fade{to{opacity:1}}"
+        ".flick{animation:flick 7s steps(1) 3s infinite}"
+        "@keyframes flick{0%,100%{opacity:1}47%{opacity:.93}48%{opacity:1}83%{opacity:.96}84%{opacity:1}}"
+        ".blink{animation:blink 1.1s steps(1) infinite}@keyframes blink{50%{opacity:0}}"
     )
-    body = (f'<g class="p">{portrait_rows(chars, levels, cols, px, py)}</g>'
-            + telemetry(stats, W / 2 - 300, W / 2 + 300, ty))
-    return document(W, h, body, css, title=f"Ahmed ({login}): character portrait and contribution telemetry")
+
+    defs = (
+        "<defs>"
+        f'<linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{EMERALD}" stop-opacity="0"/>'
+        f'<stop offset="1" stop-color="{CYAN}" stop-opacity=".22"/></linearGradient>'
+        f'<linearGradient id="sparkline" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{EMERALD}"/><stop offset="1" stop-color="{CYAN}"/></linearGradient>'
+        f'<linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{EMERALD}" stop-opacity=".28"/><stop offset="1" stop-color="{EMERALD}" stop-opacity="0"/></linearGradient>'
+        f'<pattern id="scan" width="4" height="3" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#000" opacity=".22"/></pattern>'
+        f'<clipPath id="pclip"><rect x="{PX - 8}" y="{PY - 6}" width="{pw + 16}" height="{ph + 14}" rx="10"/></clipPath>'
+        f'<clipPath id="sparkclip"><rect x="{rx}" y="0" width="{rw}" height="{H}"/></clipPath>'
+        "</defs>"
+    )
+
+    # radar sweep wedge: 40 degrees, rotating about the face once the draw completes
+    R = max(pw, ph)
+    import math
+    a0 = math.radians(-40)
+    wedge = (f"M{cx:.1f},{cy:.1f}L{cx + R * math.cos(a0):.1f},{cy + R * math.sin(a0):.1f}"
+             f"A{R},{R} 0 0 1 {cx + R:.1f},{cy:.1f}Z")
+    crt = (
+        f'<g clip-path="url(#pclip)">'
+        f'<rect x="{PX - 8}" y="{PY - 6}" width="{pw + 16}" height="{ph + 14}" fill="#0a0f15"/>'
+        + "".join(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="none" stroke="{EMERALD}" stroke-opacity=".07"/>'
+                  for r in (90, 180, 270))
+        + f'<line x1="{cx:.1f}" y1="{PY}" x2="{cx:.1f}" y2="{PY + ph}" stroke="{EMERALD}" stroke-opacity=".05"/>'
+        f'<line x1="{PX}" y1="{cy:.1f}" x2="{PX + pw}" y2="{cy:.1f}" stroke="{EMERALD}" stroke-opacity=".05"/>'
+        f'<g class="p flick">{portrait_rows(chars, levels, cols)}</g>'
+        f'<path d="{wedge}" fill="url(#sweep)" opacity="0">'
+        f'<animate attributeName="opacity" from="0" to="1" begin="{REVEAL + 0.2}s" dur="1s" fill="freeze"/>'
+        f'<animateTransform attributeName="transform" type="rotate" from="0 {cx:.1f} {cy:.1f}" to="360 {cx:.1f} {cy:.1f}" '
+        f'begin="{REVEAL + 0.2}s" dur="7s" repeatCount="indefinite"/></path>'
+        # slow phosphor refresh band
+        f'<rect x="{PX - 8}" y="{PY - 40}" width="{pw + 16}" height="40" fill="{CYAN}" opacity=".035">'
+        f'<animate attributeName="y" from="{PY - 40}" to="{PY + ph}" begin="{REVEAL + 1}s" dur="5.5s" repeatCount="indefinite"/></rect>'
+        f'<rect x="{PX - 8}" y="{PY - 6}" width="{pw + 16}" height="{ph + 14}" fill="url(#scan)"/>'
+        "</g>"
+    )
+    # HUD corner brackets around the portrait
+    bx0, by0, bx1, by1, L = PX - 8, PY - 6, PX + pw + 8, PY + ph + 8, 16
+    brackets = "".join(
+        f'<path d="M{x0},{y0 + dy * L}V{y0}H{x0 + dx * L}" fill="none" stroke="{EMERALD}" stroke-width="1.6"/>'
+        for x0, y0, dx, dy in ((bx0, by0, 1, 1), (bx1, by0, -1, 1), (bx0, by1, 1, -1), (bx1, by1, -1, -1)))
+    hud_label = (f'<text x="{bx0 + 4}" y="{by1 + 18}" class="k">SUBJECT 01 · {ROWS} ROWS × {cols} COLS · CLAHE γ0.85</text>')
+
+    # right column: identity + readout, typed in after the portrait lands
+    t = REVEAL + 0.1
+    ident = (
+        f'<g class="fade" style="animation-delay:.4s">'
+        f'<text x="{rx}" y="{PY + 18}" class="k">kael@silicon:~$ whoami</text>'
+        f'<text x="{rx}" y="{PY + 62}" font-size="40" font-weight="700" fill="{TEXT}" letter-spacing="2">AHMED</text>'
+        f'<text x="{rx}" y="{PY + 88}" font-size="14" fill="{EMERALD}">systems &amp; silicon engineer</text>'
+        "</g>"
+    )
+    rows = [
+        ("target", "apple m2 · 16-core neural engine"),
+        ("layer", "bare metal → ane graphs → runtimes"),
+        ("focus", "zero-copy hypervisor / fs paths"),
+        ("partner", "kael · co-founder"),
+        ("status", "● shipping"),
+    ]
+    readout = []
+    for i, (k, v) in enumerate(rows):
+        yy = PY + 128 + i * 22
+        color = f' fill="{EMERALD}"' if k == "status" else ""
+        readout.append(
+            f'<g class="fade" style="animation-delay:{0.7 + i * 0.18:.2f}s">'
+            f'<text x="{rx}" y="{yy}" class="m">{k}</text>'
+            f'<text x="{rx + 78}" y="{yy}" class="v"{color}>{esc(v)}</text></g>')
+    cursor = (f'<g class="fade" style="animation-delay:1.7s"><text x="{rx}" y="{PY + 128 + 5 * 22 + 4}" class="m">'
+              f'kael@silicon:~$ <tspan class="blink" fill="{EMERALD}">█</tspan></text></g>')
+    tele = telemetry(stats, rx, PY + ph - 232, rw)
+
+    # link bar (the README repeats these as clickable links: <img> SVGs can't link)
+    ly = H - 34
+    links = [("github", f"github.com/{login}"), ("mail", "f2026376047@umt.edu.pk"),
+             ("repo", "SonarANE"), ("repo", "AegisFlow")]
+    seg, lx = [], 26
+    for i, (k, v) in enumerate(links):
+        if i:
+            seg.append(f'<text x="{lx}" y="{ly + 4}" class="m">·</text>')
+            lx += 22
+        seg.append(f'<text x="{lx}" y="{ly + 4}" class="k">{k}</text>')
+        lx += len(k) * 6.6 + 8
+        seg.append(f'<text x="{lx}" y="{ly + 4}" class="v">{esc(v)}</text>')
+        lx += len(v) * 7.5 + 14
+    linkbar = (f'<line x1="1" y1="{ly - 20.5}" x2="{W - 1}" y2="{ly - 20.5}" stroke="{EDGE}"/>'
+               f'<g class="fade" style="animation-delay:{t:.1f}s">{"".join(seg)}</g>')
+
+    body = (defs + frame(W, H, f"kael@silicon: ~/{login} — hud", f"rev {stats['fetched']}")
+            + crt + brackets + hud_label + ident + "".join(readout) + cursor + tele + linkbar)
+    return document(W, H, body, css, title=f"Ahmed — systems & silicon engineer ({login})")
 
 
 if __name__ == "__main__":

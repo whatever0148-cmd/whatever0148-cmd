@@ -2,8 +2,8 @@
 
 The photo is cut out from its white backdrop, contrast-equalised (CLAHE +
 gamma), sampled onto an 85-row monospace grid and written as one <text> per
-row. Each row lands as a squashed streak and stretches open into glyphs, top
-to bottom, then an emerald/cyan
+row. Every row is typed in by its own cursor, two glyphs per keystroke, rows
+starting in a wave from the top, then an emerald/cyan
 radar sweep idles over the frame. A telemetry strip (contributions, active
 days, weekly sparkline) and a link bar sit beside and under the portrait.
 """
@@ -160,16 +160,26 @@ def portrait_rows(chars: list[str], levels: list[list[int]], cols: int) -> str:
             seg = line[i:j]
             spans.append(f'<tspan class="l{lv[i]}">{esc(seg)}</tspan>' if lv[i] else esc(seg))
             i = j
-        begin = 0.15 + r * REVEAL / ROWS
         y = PY + (r + 1) * FS
-        # the row arrives squashed flat into a bright streak, then stretches open into glyphs
+        ink = [k for k, ch in enumerate(line) if ch != " "]
+        a, b = ink[0], ink[-1] + 1
+        # every row gets its own cursor that types the row's code in, two glyphs per keystroke;
+        # rows start in a wave from the top, so dozens are being typed at once
+        begin = 0.15 + r * REVEAL * 0.8 / ROWS
+        steps = list(range(0, b - a, 2)) + [b - a]
+        dur = 0.5 + 0.011 * (b - a)
+        widths = ";".join(f"{k * CW:.1f}" for k in steps)
+        xs = ";".join(f"{PX + (a + k) * CW:.1f}" for k in steps)
+        typing = f'begin="{begin:.3f}s" dur="{dur:.2f}s" calcMode="discrete" fill="freeze"'
         out.append(
-            f'<g transform="translate({PX},{y:.1f})"><text textLength="{width:.1f}" lengthAdjust="spacing" '
-            f'xml:space="preserve" opacity="0">{"".join(spans)}'
-            f'<set attributeName="opacity" to="1" begin="{begin:.3f}s" fill="freeze"/>'
-            f'<animateTransform attributeName="transform" type="scale" values="1.06 0.08;1.02 0.35;1 1" '
-            f'keyTimes="0;0.45;1" begin="{begin:.3f}s" dur="0.6s" fill="freeze" calcMode="spline" '
-            f'keySplines=".3 0 .7 1;.2 .8 .2 1"/></text></g>'
+            f'<clipPath id="t{r}"><rect x="{PX + a * CW:.1f}" y="{y - FS:.1f}" width="0" height="{FS * 1.3:.1f}">'
+            f'<animate attributeName="width" values="{widths}" {typing}/></rect></clipPath>'
+            f'<text x="{PX}" y="{y:.1f}" textLength="{width:.1f}" lengthAdjust="spacing" '
+            f'xml:space="preserve" clip-path="url(#t{r})">{"".join(spans)}</text>'
+            f'<rect class="cur" x="{PX + a * CW:.1f}" y="{y - FS * 0.82:.1f}" width="{CW:.1f}" height="{FS * 0.95:.1f}" opacity="0">'
+            f'<animate attributeName="x" values="{xs}" {typing}/>'
+            f'<set attributeName="opacity" to="1" begin="{begin:.3f}s"/>'
+            f'<set attributeName="opacity" to="0" begin="{begin + dur + 0.15:.3f}s" fill="freeze"/></rect>'
         )
     return "".join(out)
 
@@ -241,6 +251,7 @@ def build() -> str:
         "@keyframes fade{to{opacity:1}}"
         ".flick{animation:flick 7s steps(1) 3s infinite}"
         "@keyframes flick{0%,100%{opacity:1}47%{opacity:.93}48%{opacity:1}83%{opacity:.96}84%{opacity:1}}"
+        f".cur{{fill:{EMERALD}}}"
         ".blink{animation:blink 1.1s steps(1) infinite}@keyframes blink{50%{opacity:0}}"
     )
 

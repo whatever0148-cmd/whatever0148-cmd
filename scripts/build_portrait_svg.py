@@ -19,7 +19,7 @@ from svgkit import (BG, CYAN, CYAN_SOFT, DIM, EDGE, EDGE_HI, EMERALD, EMERALD_DE
 
 PHOTO = ROOT / "source" / "headshot.jpg"
 ROWS = 85
-CROP = (150, 18, 874, 968)          # x0, y0, x1, y1 in the 1024px source
+CROP = (200, 22, 844, 868)          # x0, y0, x1, y1 in the 1024px source: head and collar
 FS = 7.0                            # font size == row pitch
 CW = FS * 0.6                       # JetBrains Mono advance: exactly 0.6em
 RAMP = " .`:-=+*cxoaO#%@"           # sparse -> dense
@@ -30,7 +30,7 @@ W, H = 960, 750
 PX, PY = 26, 54                     # portrait origin
 
 
-def clahe(img: np.ndarray, tiles: int = 8, clip: float = 2.6, bins: int = 256) -> np.ndarray:
+def clahe(img: np.ndarray, tiles: int = 8, clip: float = 3.4, bins: int = 256) -> np.ndarray:
     """Contrast-limited adaptive histogram equalisation on a [0,1] image."""
     h, w = img.shape
     th, tw = h // tiles, w // tiles
@@ -94,19 +94,27 @@ def portrait_grid() -> tuple[list[str], list[list[int]], int]:
 
     # light falls off away from the face so the white shirt can't outshine it
     yy, xx = np.mgrid[0:ROWS, 0:cols]
-    d = np.hypot((xx / cols - 0.5) / 0.55, (yy / ROWS - 0.42) / 0.62)
-    small = small * (1 - 0.38 * np.clip(d - 0.35, 0, 1))
+    d = np.hypot((xx / cols - 0.5) / 0.5, (yy / ROWS - 0.40) / 0.55)
+    small = small * (1 - 0.55 * np.clip(d - 0.3, 0, 1))
     lo, hi = np.percentile(small[a_small > 0.5], [3, 99.3])
-    v = np.clip((small - lo) / (hi - lo), 0, 1) ** 0.8
+    v = 0.16 + 0.84 * np.clip((small - lo) / (hi - lo), 0, 1) ** 1.25  # floor keeps hair texture visible
+
+    # the figure dissolves into the dark instead of ending on a hard cut-out:
+    # a soft edge from the mask, a fade below the collar, and seeded noise
+    # so sparse glyphs scatter out at the boundary
+    fade = 1 - np.clip((yy / ROWS - 0.64) / 0.26, 0, 1) ** 1.2
+    weight = np.clip((a_small - 0.15) / 0.6, 0, 1) * fade
+    thresh = np.random.default_rng(7).uniform(0.05, 0.95, (ROWS, cols))  # fixed seed: stable commits
     chars, levels = [], []
     for r in range(ROWS):
         row_c, row_l = [], []
         for c in range(cols):
-            if a_small[r, c] < 0.45:
+            wgt = weight[r, c]
+            if wgt <= thresh[r, c]:
                 row_c.append(" ")
                 row_l.append(0)
                 continue
-            x = v[r, c]
+            x = v[r, c] * (0.45 + 0.55 * wgt)
             row_c.append(RAMP[1 + min(int(x * (len(RAMP) - 1)), len(RAMP) - 2)])
             row_l.append(1 + min(int(x * LEVELS), LEVELS - 1))
         chars.append("".join(row_c))
@@ -130,10 +138,22 @@ def portrait_rows(chars: list[str], levels: list[list[int]], cols: int) -> str:
             i = j
         begin = 0.15 + r * REVEAL / ROWS
         y = PY + (r + 1) * FS
+        ink = [k for k, ch in enumerate(line) if ch != " "]
+        x0, x1 = PX + ink[0] * CW, PX + (ink[-1] + 1) * CW
+        dx = ((r * 37) % 23 - 11) * 1.6     # deterministic jitter: each row lands from its own offset
+        # a bright smear spans the row's ink first, then the glyphs snap in over it
         out.append(
+            f'<rect x="{x0:.1f}" y="{y - FS * 0.72:.1f}" width="{x1 - x0:.1f}" height="{FS * 0.62:.1f}" '
+            f'fill="url(#smear)" opacity="0">'
+            f'<animate attributeName="opacity" values="0;.85;0" keyTimes="0;.25;1" begin="{begin - 0.05:.3f}s" '
+            f'dur="0.5s" fill="freeze"/>'
+            f'<animateTransform attributeName="transform" type="translate" from="{-dx * 2:.1f} 0" to="0 0" '
+            f'begin="{begin - 0.05:.3f}s" dur="0.5s" fill="freeze"/></rect>'
             f'<text x="{PX}" y="{y:.1f}" textLength="{width:.1f}" lengthAdjust="spacing" '
             f'xml:space="preserve" opacity="0">{"".join(spans)}'
-            f'<animate attributeName="opacity" from="0" to="1" begin="{begin:.3f}s" dur="0.14s" fill="freeze"/>'
+            f'<animate attributeName="opacity" values="0;.55;1" keyTimes="0;.4;1" begin="{begin:.3f}s" dur="0.32s" fill="freeze"/>'
+            f'<animateTransform attributeName="transform" type="translate" from="{dx:.1f} 0" to="0 0" begin="{begin:.3f}s" '
+            f'dur="0.32s" fill="freeze" calcMode="spline" keySplines=".15 .8 .25 1" keyTimes="0;1"/>'
             f"</text>"
         )
     return "".join(out)
@@ -189,7 +209,7 @@ def build() -> str:
     rx = PX + pw + 34                      # right column
     rw = W - rx - 26
 
-    opac = [0, 0.3, 0.42, 0.54, 0.66, 0.77, 0.87, 0.95, 1.0]
+    opac = [0, 0.3, 0.42, 0.55, 0.67, 0.78, 0.88, 0.96, 1.0]
     level_css = "".join(
         f".l{i}{{fill:url(#{'hi' if i >= LEVELS - 1 else 'tone'});fill-opacity:{opac[i]}}}" for i in range(1, LEVELS + 1))
     css = (
@@ -209,9 +229,12 @@ def build() -> str:
     defs = (
         "<defs>"
         f'<linearGradient id="tone" gradientUnits="userSpaceOnUse" x1="{PX}" y1="{PY}" x2="{PX + pw}" y2="{PY + ph}">'
-        f'<stop offset="0" stop-color="{EMERALD}"/><stop offset="1" stop-color="{CYAN}"/></linearGradient>'
+        f'<stop offset="0" stop-color="#8ff0c8"/><stop offset=".55" stop-color="{MINT}"/><stop offset="1" stop-color="{CYAN_SOFT}"/></linearGradient>'
         f'<linearGradient id="hi" gradientUnits="userSpaceOnUse" x1="{PX}" y1="{PY}" x2="{PX + pw}" y2="{PY + ph}">'
-        f'<stop offset="0" stop-color="{MINT}"/><stop offset="1" stop-color="#cffafe"/></linearGradient>'
+        f'<stop offset="0" stop-color="#f0fff8"/><stop offset="1" stop-color="#ecfeff"/></linearGradient>'
+        f'<linearGradient id="smear" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{MINT}" stop-opacity="0"/>'
+        f'<stop offset=".18" stop-color="#ffffff" stop-opacity=".9"/><stop offset=".82" stop-color="{CYAN_SOFT}" stop-opacity=".9"/>'
+        f'<stop offset="1" stop-color="{CYAN}" stop-opacity="0"/></linearGradient>'
         f'<linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{CYAN}" stop-opacity="0"/>'
         f'<stop offset=".7" stop-color="{CYAN_SOFT}" stop-opacity=".55"/><stop offset="1" stop-color="#ffffff" stop-opacity=".9"/></linearGradient>'
         f'<linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{EMERALD}" stop-opacity="0"/>'

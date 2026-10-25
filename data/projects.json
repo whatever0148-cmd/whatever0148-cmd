@@ -1,0 +1,33 @@
+{
+ "_note": "Every metric is copied from the project's own telemetry; see the source field. Edit here, then run scripts/build_cards.py.",
+ "projects": [
+  {
+   "name": "AegisFlow",
+   "status": "private · publishing soon",
+   "live": false,
+   "tags": "rust · swift · coreml ane · apfs cow · cedar",
+   "summary": "Zero-root speculative copy-on-write workspace versioning and agent governance runtime.",
+   "metrics": [
+    ["0.121 ms", "warm-pool APFS branch · 1,025 files"],
+    ["0.088 ms", "caller-visible rollback"],
+    ["36/36 ops", "on the 16-core ANE · 0.182 ms"],
+    ["4.25 µs", "Cedar policy evaluation"]
+   ],
+   "source": "AegisFlow artifacts/aegis_phase1_telemetry.json (2026-10-25 run)"
+  },
+  {
+   "name": "SonarANE",
+   "status": "public · MIT",
+   "live": true,
+   "tags": "python · coreml mil · dsp · ultrasonic mimo",
+   "summary": "2D ultrasonic MIMO radar and contactless chest-respiration interferometer on an unmodified M2 MacBook Air.",
+   "metrics": [
+    ["503 µs", "877-op unrolled FISTA on the ANE"],
+    ["20.0×", "faster than NumPy FP32 + Accelerate"],
+    ["93%", "2D hand-tracking coverage"],
+    ["16.0 BPM", "breathing · 0.176 mm phase floor"]
+   ],
+   "source": "SonarANE artifacts/ane_superres_benchmark.json, phase3/phase4_telemetry.json"
+  }
+ ]
+}

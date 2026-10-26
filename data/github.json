@@ -1,6 +1,6 @@
 {
  "owner": "whatever0148-cmd",
- "fetched": "2026-10-25",
+ "fetched": "2026-10-26",
  "source": "graphql",
  "days": [
   [
@@ -1193,7 +1193,11 @@
   ],
   [
    "2026-10-25",
-   1
+   10
+  ],
+  [
+   "2026-10-26",
+   2
   ]
  ],
  "repo_languages": {
@@ -1203,6 +1207,15 @@
   },
   "SonarANE": {
    "Python": 251979
+  },
+  "AegisFlow": {
+   "Rust": 1076071,
+   "JavaScript": 321830,
+   "Python": 192927,
+   "CSS": 51169,
+   "Swift": 36176,
+   "Shell": 19289,
+   "HTML": 14683
   }
  }
 }

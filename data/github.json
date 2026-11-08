@@ -1,6 +1,6 @@
 {
  "owner": "whatever0148-cmd",
- "fetched": "2026-11-07",
+ "fetched": "2026-11-08",
  "source": "graphql",
  "days": [
   [
@@ -1245,6 +1245,10 @@
   ],
   [
    "2026-11-07",
+   1
+  ],
+  [
+   "2026-11-08",
    0
   ]
  ],
@@ -1266,10 +1270,11 @@
    "HTML": 14683
   },
   "motion-film-studio": {
-   "Python": 82639,
-   "JavaScript": 81453,
-   "Shell": 4114,
-   "HTML": 2056
+   "JavaScript": 580219,
+   "Python": 147029,
+   "Shell": 10369,
+   "HTML": 3475,
+   "Swift": 1117
   }
  }
 }
